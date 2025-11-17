@@ -86,6 +86,7 @@ class AgentSessionOptions:
     min_consecutive_speech_delay: float
     use_tts_aligned_transcript: bool | None
     preemptive_generation: bool
+    filler_words: list[str]
     tts_text_transforms: Sequence[TextTransforms] | None
     ivr_detection: bool
 
@@ -293,6 +294,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             false_interruption_timeout=false_interruption_timeout,
             resume_false_interruption=resume_false_interruption,
             min_consecutive_speech_delay=min_consecutive_speech_delay,
+            filler_words=[],
             tts_text_transforms=(
                 tts_text_transforms
                 if is_given(tts_text_transforms)
@@ -318,6 +320,15 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             tts = inference.TTS.from_model_string(tts)
 
         self._stt = stt or None
+
+    def update_filler_words(self, filler_words: list[str]) -> None:
+        """Update the runtime list of filler words/phrases that should be
+        ignored during agent speech. The list is language-agnostic and
+        comparisons are done case-insensitively.
+
+        This allows dynamic updates at runtime (bonus feature).
+        """
+        self._opts.filler_words = list(filler_words)
         self._vad = vad or None
         self._llm = llm or None
         self._tts = tts or None
