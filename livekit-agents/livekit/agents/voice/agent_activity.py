@@ -16,6 +16,8 @@ from livekit.agents.llm.realtime import MessageGeneration
 from livekit.agents.metrics.base import Metadata
 
 from .. import llm, stt, tts, utils, vad
+from ..utils import AudioBuffer
+import re
 from ..llm.tool_context import (
     StopResponse,
     ToolFlag,
@@ -1226,8 +1228,68 @@ class AgentActivity(RecognitionHooks):
             # ignore vad inference done event if turn_detection is manual or realtime_llm
             return
 
+        # If the agent is currently speaking, attempt to distinguish
+        # short filler words/phrases from real interruptions by running
+        # extension layer on top of VAD (no modification to base VAD).
         if ev.speech_duration >= self._session.options.min_interruption_duration:
+            # If there is an active speech and STT available and a configurable
+            # filler list, spawn an async classifier task to decide.
+            if self._current_speech is not None and not self._current_speech.interrupted:
+                filler_list = getattr(self._session.options, "filler_words", []) or []
+                if not filler_list or self.stt is None:
+                    self._interrupt_by_audio_activity()
+                    return
+
+                # schedule async classification; do not block the VAD thread
+                try:
+                    asyncio.create_task(self._classify_vad_frames_and_decide(ev, filler_list))
+                except Exception:
+                    # if scheduling fails, fallback to interrupting to remain safe
+                    logger.exception("failed to schedule filler classification task, interrupting")
+                    self._interrupt_by_audio_activity()
+            else:
+                # agent not speaking — treat as valid user speech
+                self._interrupt_by_audio_activity()
+
+    async def _classify_vad_frmes_and_decide(self, ev: vad.VADEvent, filler_list: list[str]) -> None:
+        """Run a short STT recognize on the VAD frames and decide whether
+        to ignore the detected speech (if it is composed only of filler words)
+        or to treat it as a valid interruption. This function is async and
+        scheduled from the sync VAD handler to avoid changing VAD internals.
+        """
+        if self._current_speech is None or self._current_speech.interrupted:
+            return
+        filler_set = {w.strip().lower() for w in filler_list if w.strip()}
+        try:
+            # ev.frames is a list[rtc.AudioFrame] (AudioBuffer alias)
+            buffer: AudioBuffer = ev.frames
+            stt_event = await self.stt.recognize(buffer)
+            transcript = "".join([alt.text for alt in stt_event.alternatives]).strip()
+        except Exception:
+            logger.exception("error during filler-word STT recognition")
             self._interrupt_by_audio_activity()
+            return
+
+        if not transcript:
+            logger.debug("Ignored empty transcript during agent speech (treated as filler)")
+            return
+
+        # simple tokenization: split on whitespace and punctuation
+        tokens = [t for t in re.split(r"\W+", transcript.lower()) if t]
+        interrupt_keywords = {"stop", "wait", "pause", "hold", "cut", "no"}
+
+        # if any interrupt keyword appears, treat as valid interruption
+        if any(tok in interrupt_keywords for tok in tokens):
+            logger.info("Valid interruption detected during agent speech", extra={"transcript": transcript})
+            self._interrupt_by_audio_activity()
+            return
+
+        if tokens and all(tok in filler_set for tok in tokens):
+            logger.debug("Ignored filler interruption while agent speaking", extra={"transcript": transcript})
+            return
+
+        logger.info("User interruption detected during agent speech", extra={"transcript": transcript})
+        self._interrupt_by_audio_activity()
 
     def on_interim_transcript(self, ev: stt.SpeechEvent, *, speaking: bool | None) -> None:
         if isinstance(self.llm, llm.RealtimeModel) and self.llm.capabilities.user_transcription:
