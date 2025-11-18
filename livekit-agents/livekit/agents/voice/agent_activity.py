@@ -1288,12 +1288,13 @@ class AgentActivity(RecognitionHooks):
             logger.debug("Ignored filler interruption while agent speaking", extra={"transcript": transcript})
             return
 
+        # Otherwise, treat as a valid interruption
+        logger.info("User interruption detected during agent speech", extra={"transcript": transcript})
+        self._interrupt_by_audio_activity()
+
     # Keep a backward-compatible alias for the previous-typo name to avoid
     # AttributeError if some code or tests still call the misspelled method.
     _classify_vad_frmes_and_decide = _classify_vad_frames_and_decide
-
-        logger.info("User interruption detected during agent speech", extra={"transcript": transcript})
-        self._interrupt_by_audio_activity()
 
     def on_interim_transcript(self, ev: stt.SpeechEvent, *, speaking: bool | None) -> None:
         if isinstance(self.llm, llm.RealtimeModel) and self.llm.capabilities.user_transcription:
