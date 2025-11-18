@@ -328,61 +328,9 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
 
         This allows dynamic updates at runtime (bonus feature).
         """
+        # Only update the runtime filler words list. Do not reinitialize
+        # session state or mutate other session fields here.
         self._opts.filler_words = list(filler_words)
-        self._vad = vad or None
-        self._llm = llm or None
-        self._tts = tts or None
-        self._mcp_servers = mcp_servers or None
-        self._tools = tools if is_given(tools) else []
-
-        # unrecoverable error counts, reset after agent speaking
-        self._llm_error_counts = 0
-        self._tts_error_counts = 0
-
-        # configurable IO
-        self._input = io.AgentInput(self._on_video_input_changed, self._on_audio_input_changed)
-        self._output = io.AgentOutput(
-            self._on_video_output_changed,
-            self._on_audio_output_changed,
-            self._on_text_output_changed,
-        )
-
-        self._forward_audio_atask: asyncio.Task[None] | None = None
-        self._forward_video_atask: asyncio.Task[None] | None = None
-        self._update_activity_atask: asyncio.Task[None] | None = None
-        self._activity_lock = asyncio.Lock()
-        self._lock = asyncio.Lock()
-
-        # used to keep a reference to the room io
-        self._room_io: room_io.RoomIO | None = None
-        self._recorder_io: RecorderIO | None = None
-
-        self._agent: Agent | None = None
-        self._activity: AgentActivity | None = None
-        self._next_activity: AgentActivity | None = None
-        self._user_state: UserState = "listening"
-        self._agent_state: AgentState = "initializing"
-        self._user_away_timer: asyncio.TimerHandle | None = None
-
-        self._userdata: Userdata_T | None = userdata if is_given(userdata) else None
-        self._closing_task: asyncio.Task[None] | None = None
-        self._closing: bool = False
-        self._job_context_cb_registered: bool = False
-
-        self._global_run_state: RunResult | None = None
-
-        # trace
-        self._user_speaking_span: trace.Span | None = None
-        self._agent_speaking_span: trace.Span | None = None
-        self._session_span: trace.Span | None = None
-        self._root_span_context: otel_context.Context | None = None
-
-        self._recorded_events: list[AgentEvent] = []
-        self._enable_recording: bool = False
-        self._started_at: float | None = None
-
-        # ivr activity
-        self._ivr_activity: IVRActivity | None = None
 
     def emit(self, event: EventTypes, arg: AgentEvent) -> None:  # type: ignore
         self._recorded_events.append(arg)

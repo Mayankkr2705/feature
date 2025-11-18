@@ -1251,7 +1251,7 @@ class AgentActivity(RecognitionHooks):
                 # agent not speaking — treat as valid user speech
                 self._interrupt_by_audio_activity()
 
-    async def _classify_vad_frmes_and_decide(self, ev: vad.VADEvent, filler_list: list[str]) -> None:
+    async def _classify_vad_frames_and_decide(self, ev: vad.VADEvent, filler_list: list[str]) -> None:
         """Run a short STT recognize on the VAD frames and decide whether
         to ignore the detected speech (if it is composed only of filler words)
         or to treat it as a valid interruption. This function is async and
@@ -1287,6 +1287,10 @@ class AgentActivity(RecognitionHooks):
         if tokens and all(tok in filler_set for tok in tokens):
             logger.debug("Ignored filler interruption while agent speaking", extra={"transcript": transcript})
             return
+
+    # Keep a backward-compatible alias for the previous-typo name to avoid
+    # AttributeError if some code or tests still call the misspelled method.
+    _classify_vad_frmes_and_decide = _classify_vad_frames_and_decide
 
         logger.info("User interruption detected during agent speech", extra={"transcript": transcript})
         self._interrupt_by_audio_activity()
